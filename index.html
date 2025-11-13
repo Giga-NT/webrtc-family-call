@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Семейный видеозвонок</title>
+    <meta charset="UTF-8">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .room-input {
+            text-align: center;
+            margin: 30px 0;
+        }
+        input {
+            padding: 12px 20px;
+            margin: 10px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            width: 250px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        button {
+            padding: 12px 25px;
+            margin: 8px;
+            border: none;
+            border-radius: 8px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .controls {
+            text-align: center;
+            margin: 25px 0;
+        }
+        .video-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin: 30px 0;
+        }
+        .video-wrapper {
+            text-align: center;
+        }
+        video {
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            background: #000;
+            border-radius: 10px;
+            border: 3px solid #007bff;
+        }
+        #status {
+            padding: 15px;
+            margin: 20px 0;
+            background: #e7f3ff;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            border-left: 4px solid #007bff;
+        }
+        .instructions {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📞 Семейный видеозвонок</h1>
+        
+        <div class="instructions">
+            <strong>Как использовать:</strong><br>
+            1. Введите любой ID комнаты (например: family123)<br>
+            2. Откройте эту же страницу на другом устройстве<br>
+            3. Введите тот же ID комнаты<br>
+            4. Нажмите "Начать звонок" на обоих устройствах
+        </div>
+        
+        <div class="room-input">
+            <input type="text" id="roomInput" placeholder="Введите ID комнаты (например: family123)">
+            <button onclick="joinRoom()">Присоединиться к комнате</button>
+        </div>
+
+        <div id="status">Введите ID комнаты и присоединитесь...</div>
+
+        <div class="controls">
+            <button onclick="startCall()" id="startBtn" disabled>🎥 Начать звонок</button>
+            <button onclick="toggleVideo()" id="videoBtn">📹 Выключить видео</button>
+            <button onclick="toggleAudio()" id="audioBtn">🎤 Выключить звук</button>
+            <button onclick="hangUp()" id="hangupBtn" disabled>📞 Завершить</button>
+        </div>
+
+        <div class="video-container">
+            <div class="video-wrapper">
+                <h3>Ваше видео:</h3>
+                <video id="localVideo" autoplay muted></video>
+            </div>
+            <div class="video-wrapper">
+                <h3>Удаленное видео:</h3>
+                <video id="remoteVideo" autoplay></video>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Конфигурация WebRTC
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
+            ]
+        };
+
+        let localStream = null;
+        let peerConnection = null;
+        let isCallStarted = false;
+        let roomId = null;
+
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const startBtn = document.getElementById('startBtn');
+        const hangupBtn = document.getElementById('hangupBtn');
+        const statusDiv = document.getElementById('status');
+
+        function updateStatus(message) {
+            statusDiv.textContent = message;
+            console.log('Status:', message);
+        }
+
+        function joinRoom() {
+            roomId = document.getElementById('roomInput').value.trim();
+            if (!roomId) {
+                alert('Пожалуйста, введите ID комнаты');
+                return;
+            }
+            
+            startBtn.disabled = false;
+            updateStatus(`✅ Присоединились к комнате: ${roomId}. Нажмите "Начать звонок"`);
+            
+            // Сохраняем комнату в localStorage
+            localStorage.setItem('webrtc-room', roomId);
+        }
+
+        async function startCall() {
+            try {
+                updateStatus('🔄 Запрос доступа к камере и микрофону...');
+                
+                // Получаем доступ к камере и микрофону
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+                
+                // Показываем локальное видео
+                localVideo.srcObject = localStream;
+                
+                isCallStarted = true;
+                startBtn.disabled = true;
+                hangupBtn.disabled = false;
+                updateStatus('✅ Звонок начат! Камера и микрофон активны.');
+
+                // Создаем PeerConnection для будущих улучшений
+                createPeerConnection();
+
+            } catch (error) {
+                console.error('Ошибка доступа к медиаустройствам:', error);
+                
+                if (error.name === 'NotAllowedError') {
+                    alert('Доступ к камере/микрофону запрещен. Разрешите доступ в настройках браузера.');
+                    updateStatus('❌ Доступ к камере/микрофону запрещен');
+                } else if (error.name === 'NotFoundError') {
+                    alert('Камера или микрофон не найдены.');
+                    updateStatus('❌ Камера или микрофон не найдены');
+                } else {
+                    alert('Ошибка доступа к медиаустройствам: ' + error.message);
+                    updateStatus('❌ Ошибка доступа к устройствам');
+                }
+            }
+        }
+
+        function createPeerConnection() {
+            // Это заглушка для будущего добавления P2P связи
+            // Сейчас работает только локальная камера
+            peerConnection = new RTCPeerConnection(config);
+            
+            // Добавляем локальные треки
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+            }
+
+            // Обработка удаленного потока (для будущего)
+            peerConnection.ontrack = (event) => {
+                const remoteStream = event.streams[0];
+                remoteVideo.srcObject = remoteStream;
+                updateStatus('✅ Видеосвязь установлена!');
+            };
+        }
+
+        function hangUp() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            isCallStarted = false;
+            startBtn.disabled = false;
+            hangupBtn.disabled = true;
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            
+            updateStatus('📞 Звонок завершен. Можете начать новый.');
+        }
+
+        function toggleVideo() {
+            if (localStream) {
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    videoTrack.enabled = !videoTrack.enabled;
+                    document.getElementById('videoBtn').textContent = 
+                        videoTrack.enabled ? '📹 Выключить видео' : '📹 Включить видео';
+                    updateStatus(videoTrack.enabled ? '✅ Видео включено' : '📹 Видео выключено');
+                }
+            }
+        }
+
+        function toggleAudio() {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    document.getElementById('audioBtn').textContent = 
+                        audioTrack.enabled ? '🎤 Выключить звук' : '🎤 Включить звук';
+                    updateStatus(audioTrack.enabled ? '✅ Звук включен' : '🔇 Звук выключен');
+                }
+            }
+        }
+
+        // Восстанавливаем комнату при загрузке страницы
+        window.addEventListener('load', () => {
+            const savedRoom = localStorage.getItem('webrtc-room');
+            if (savedRoom) {
+                document.getElementById('roomInput').value = savedRoom;
+            }
+        });
+
+        // Обработка нажатия Enter
+        document.getElementById('roomInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinRoom();
+        });
+
+        // Предупреждение при закрытии страницы
+        window.addEventListener('beforeunload', (e) => {
+            if (isCallStarted) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+    </script>
+</body>
+</html>
